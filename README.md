@@ -84,7 +84,10 @@ failing.
 | `monitoring-rules` | – | alert rules for golden-path services |
 | `metrics-server` | – | kind doesn't ship one, and backstage's kubernetes tab wants it |
 | `cluster-rbac` | – | the read-only service account backstage uses |
-| `services` (ApplicationSet) | – | deploys any org repo that has a `k8s/` folder |
+| `services` (ApplicationSet) | 4 | deploys any org repo that has a `k8s/` folder |
+| `external-secrets`, `gateway-api-crds` | 5 | External Secrets Operator (three small pods) and the Gateway API standard CRDs (no controller), so tenant and app manifests apply |
+| `tenants` (ApplicationSet) | 6 | one Application per `tenants/<team>/runtime/overlays/development` |
+| `oc-apps` (ApplicationSet) | 7 | one Application per team-alpha `apps/<name>/chart`, Helm with `values-development.yaml` |
 
 - ArgoCD: **https**://localhost:8081 (self-signed cert, click through)
   `kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d`
@@ -110,6 +113,39 @@ can review and merge its own infrastructure without commit access here.
 The split inside a team repo still matters: Crossplane claims in `claims/` are
 continuously reconciled by ArgoCD, the Terraform in `infra/` is validated by CI
 but nothing applies it. 
+
+## OpenChoreo templates: what ArgoCD syncs
+
+The demo has **one cluster**, so only the **development** environment is
+synced. The staging and production overlays and values files are written by the
+templates but ignored here.
+
+- **Team namespace** (portal template "OpenChoreo Team Namespace with
+  Guardrails"): merging its PR adds `tenants/<team>/`. The `tenants`
+  ApplicationSet creates `tenant-<team>` from
+  `tenants/<team>/runtime/overlays/development`, giving namespace
+  `<team>-development` with quota, limit range, network policies, RBAC and the
+  `platform-secrets` SecretStore. `tenants/<team>/openchoreo/` is **not**
+  synced: it holds OpenChoreo `Environment`/`DeploymentPipeline` resources and
+  this cluster has no OpenChoreo CRDs.
+- **Deployment blueprint** (portal template "OpenChoreo Deployment
+  Blueprint"): merging its PR adds `apps/<name>/chart` to team-alpha. The
+  `oc-apps` ApplicationSet creates `oc-<name>`, a Helm release with
+  `values.yaml` + `values-development.yaml` into `<team>-development` (the team
+  is `team:` in the chart's `values.yaml`). It never creates the namespace, so
+  the team namespace must be merged first; until then the sync retries.
+
+The rendered resources use External Secrets and Gateway API kinds, so
+`external-secrets` (Helm, small requests, fits the LEAN box) and
+`gateway-api-crds` (CRDs only) are installed too. `ServiceMonitor` comes from
+`monitoring`, or from the CRDs `LEAN=1 scripts/bootstrap.sh` applies.
+
+What does not work on kind: the `SecretStore` points at Azure Key Vault, AWS
+Secrets Manager, STACKIT or Vault and cannot authenticate, so it and any
+`ExternalSecret` stay not-ready and the Secret is never created; apps that
+reference it will not start. `HTTPRoute`s are stored but nothing serves them (no
+Gateway controller, and the `gatewayNamespace` they point at does not exist).
+As with `infra-team-alpha`, a private team-alpha needs a repository secret.
 
 ## secrets you need in the cluster
 
