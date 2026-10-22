@@ -1,0 +1,49 @@
+# every apps/<name>/chart in team-alpha (the "OpenChoreo Deployment Blueprint"
+# template), deployed to <team>-development. development only: one cluster.
+# the team comes from `team:` in the chart's values.yaml.
+# the namespace is created by the tenants ApplicationSet (wave 6), not here;
+# until it exists the sync fails and retries.
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: oc-apps
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "7"
+spec:
+  generators:
+    - git:
+        # same repo as infra-team-alpha; if you fork it private, the same
+        # repository secret covers this too
+        repoURL: https://github.com/efekaya-devex-platform/team-alpha
+        revision: main
+        files:
+          - path: apps/*/chart/values.yaml
+  template:
+    metadata:
+      name: 'oc-{{path[1]}}'
+    spec:
+      project: default
+      source:
+        repoURL: https://github.com/efekaya-devex-platform/team-alpha
+        targetRevision: main
+        path: 'apps/{{path[1]}}/chart'
+        helm:
+          valueFiles:
+            - values.yaml
+            - values-development.yaml
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: '{{team}}-development'
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=false
+        retry:
+          limit: 5
+          backoff:
+            duration: 15s
+            factor: 2
+            maxDuration: 2m

@@ -1,0 +1,44 @@
+# one Application per team namespace created by the "OpenChoreo Team Namespace
+# with Guardrails" template: tenants/<team>/runtime/overlays/development.
+# the demo has ONE cluster, so only the development environment is synced;
+# staging and production overlays are ignored here.
+# tenants/<team>/openchoreo is NOT synced: it holds OpenChoreo CRs
+# (Environment, DeploymentPipeline) and this cluster has no OpenChoreo CRDs.
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: tenants
+  namespace: argocd
+  annotations:
+    # after external-secrets (5): the overlay ships a SecretStore
+    argocd.argoproj.io/sync-wave: "6"
+spec:
+  generators:
+    - git:
+        repoURL: https://github.com/efekaya-devops/idp-gitops
+        revision: main
+        directories:
+          - path: tenants/*/runtime/overlays/development
+  template:
+    metadata:
+      name: 'tenant-{{path[1]}}'
+    spec:
+      project: default
+      source:
+        repoURL: https://github.com/efekaya-devops/idp-gitops
+        targetRevision: main
+        path: '{{path}}'
+      destination:
+        server: https://kubernetes.default.svc
+        # same value the overlay sets with its kustomize `namespace:`
+        namespace: '{{path[1]}}-development'
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        retry:
+          limit: 5
+          backoff:
+            duration: 15s
+            factor: 2
+            maxDuration: 2m
